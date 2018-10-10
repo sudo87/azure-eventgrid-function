@@ -1,5 +1,5 @@
 {
     "dependencies": {
-        "azure-storage": "^2.8.1"
+        "azure-storage": "latest"
     }
 }

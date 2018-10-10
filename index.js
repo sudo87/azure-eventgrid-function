@@ -26,6 +26,7 @@ module.exports = function (context, eventGridEvent) {
             function (error, blobMetadataResult) {
                 if (error) {
                     context.log("Error fetching metadata");
+                    context.done();
                 } else {
                     if (blobMetadataResult) {
                         // context.log('BlobMetaResult: ', JSON.stringify(blobMetadataResult, null, 2));
@@ -199,8 +200,10 @@ var postBinaryStreamObject = function (context, envConfig, headers, binaryStream
         res.on('end', function () {
             var isSuccessfull = false;
             if (res.statusCode == 200 && responseBody) {
-                const responseMessage = `Using taskId ${taskId}, RDP API Response: ${responseBody}`;
-                context.log(responseMessage);
+                if (isDebugEnabled) {
+                    const responseMessage = `Using taskId ${taskId}, RDP API Response: ${responseBody}`;
+                    context.log(responseMessage);
+                }
                 var responseJson = JSON.parse(responseBody);
                 if (responseJson && responseJson.response && responseJson.response.status && responseJson.response.status.toLowerCase() == 'success') {
                     isSuccessfull = true;
