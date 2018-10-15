@@ -1,59 +1,76 @@
+// FunctionName: eventgridCreateBinaryStreamMetadata
+// Purpose: When a file is uploaded to an RDP media asset bucket for a tenant, the bucket should trigger this function. 
+// It Will create binary stream object that contains the metadata of the file. 
+// It will invoke a REST API call on RDP API Server.
+// Version: 18.10
+// Last update: Oct-15-2018, eventgrid integrated function
+
 'use strict';
 
 var isDebugEnabled = false;
 var http = require('http');
-var connectionString = 'DefaultEndpointsProtocol=https;AccountName=enggazqa5mediastorage;AccountKey=rI9svpNpZJ9CBtI32Nx5Pjf7B7RU0//E6c0IyNo4zqaseBAir3UMld0DXzXqwuMZPZK5Z9CjhfOnVGVq+riIOg==;EndpointSuffix=core.windows.net';
 const storage = require('azure-storage');
-const blobService = storage.createBlobService(connectionString);
-
 
 const TASK_ID_METADATA_PROPERTY = 'x-rdp-taskid';
 const RDP_ESCAPING_PREFIX = 'x_rdp_';
 const RDP_PREFIX = 'x-rdp-';
-isDebugEnabled = false;
 
 module.exports = function (context, eventGridEvent) {
-    //  context.log("Eventgrid event: ", eventGridEvent);
     if (isDebugEnabled) {
         context.log("Eventgrid event: ", eventGridEvent);
     }
 
-    var subjectVal = eventGridEvent.subject;
-    if (subjectVal.indexOf('/renditions/') === -1) {
-        var fileBlobName = eventGridEvent.data.url.split("/").pop();
-        // context.log("filename: ", fileBlobName);
-        blobService.getBlobMetadata('rdp-media-assets-engg-az-qa5-rwtest', fileBlobName,
-            function (error, blobMetadataResult) {
-                if (error) {
-                    context.log("Error fetching metadata");
-                    context.done();
-                } else {
-                    if (blobMetadataResult) {
-                        // context.log('BlobMetaResult: ', JSON.stringify(blobMetadataResult, null, 2));
-                        // Get the env configuration
-                        var envConfig = getEnvironmentConfiguration(context);
-                        // context.log("Env conf: ", envConfig);
-                        if (envConfig) {
-                            var blobMetadata = getBlobMetadata(blobMetadataResult);
 
+    // obtain subject value from event
+    // e.g. '/blobServices/default/containers/rdp-media-assets-engg-az-qa5-rwtest/blobs/renditions/8thoct5k2ndset4048_twoHundred.tiff'
+    var subjectVal = eventGridEvent.subject.split("/");
+    // avoid any subdirectory blob processing
+    if (subjectVal.length == 7) {
+
+        var containerName = subjectVal[4]
+        var fileBlobName = subjectVal.pop();
+
+        // get env Config
+        var envConfig = getEnvironmentConfiguration(context);
+
+        if (isDebugEnabled) {
+            context.log.info("Container name: ", containerName);
+            context.log.info("blobName : ", fileBlobName);
+            context.log.includes("Env config: ", envConfig);
+        }
+
+        if (envConfig && envConfig.StorageConStr) {
+            var StorageCreds = envConfig.StorageConStr;
+            const blobService = storage.createBlobService(StorageCreds);
+
+            // get blob metadata
+            blobService.getBlobMetadata(containerName, fileBlobName,
+                function (error, blobMetadataResult) {
+                    if (error) {
+                        context.log("Error fetching metadata");
+                        context.log("subjectVal: ", subjectVal);
+                        context.done();
+                    } else {
+                        if (blobMetadataResult) {
+                            if (isDebugEnabled) {
+                                context.log('BlobMetaResult: ', JSON.stringify(blobMetadataResult, null, 2));
+                            }
+
+                            var blobMetadata = getBlobMetadata(blobMetadataResult);
                             if (blobMetadata && blobMetadata['x-rdp-tenantid']) {
                                 var headers = createRequestHeaders(envConfig, blobMetadata);
-
                                 var binaryStreamObject = buildBinaryStreamObject(context, eventGridEvent, blobMetadataResult, headers);
-                                // context.log("binaryObject: ", JSON.stringify(binaryStreamObject));
-
                                 postBinaryStreamObject(context, envConfig, headers, binaryStreamObject);
                             } else {
                                 const errorMsg = "TenantId is not present in asset metadata";
+                                context.log.error(errorMsg);
                             }
                         }
                     }
-
-                }
-            });
-    } else {
-        context.log("objectKey has slash in it");
+                });
+        }
     }
+    context.done();
 }
 
 var getBlobMetadata = function (blobMetadataResult) {
@@ -161,7 +178,6 @@ var buildBinaryStreamObject = function (context, eventGridEvent, blobMetadataRes
             binaryStreamObject.binaryStreamObject.properties[propertyName] = blobMetadata[propertyName];
         }
     }
-
     return binaryStreamObject;
 }
 
@@ -237,6 +253,12 @@ var getHttpRequestOptions = function (envConfig, headers) {
 };
 
 var getEnvironmentConfiguration = function (context) {
+    if (!process.env.StorageConStr) {
+        const errorMsg = "Unable to locate environment variable StorageConStr";
+        context.log.error(errorMsg);
+        context.done(errorMsg);
+        return null;
+    }
 
     if (!process.env.ENV_RDP_HOST) {
         const errorMsg = "Unable to locate environment variable ENV_RDP_HOST";
